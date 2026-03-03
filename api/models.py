@@ -2,6 +2,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 
 
 class Currency(models.Model):
@@ -103,3 +104,105 @@ class PortfolioHolding(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user_id}:{self.currency.code}={self.amount}"
+
+    class ExchangeRate(models.Model):
+        """
+        Historical FX rate for a given CurrencyPair.
+        rate = quote per 1 base (e.g., GBP/USD rate=1.25 means 1 GBP = 1.25 USD)
+        """
+        pair = models.ForeignKey(CurrencyPair, on_delete=models.PROTECT, related_name="rates")
+        rate = models.DecimalField(max_digits=20, decimal_places=6)
+        as_of = models.DateTimeField(default=timezone.now)
+        source = models.CharField(max_length=16, default="seed")  # seed/api/manual/csv
+
+        created_at = models.DateTimeField(auto_now_add=True)
+
+        class Meta:
+            ordering = ["-as_of"]
+            constraints = [
+                models.UniqueConstraint(fields=["pair", "as_of"], name="uniq_rate_pair_asof")
+            ]
+            indexes = [
+                models.Index(fields=["pair", "-as_of"]),
+            ]
+
+        def __str__(self) -> str:
+            return f"{self.pair.code}@{self.as_of:%Y-%m-%d %H:%M}={self.rate}"
+
+    class Trade(models.Model):
+        class Side(models.TextChoices):
+            BUY = "BUY", "BUY"  # buy base using quote
+            SELL = "SELL", "SELL"  # sell base for quote
+
+        class Status(models.TextChoices):
+            EXECUTED = "EXECUTED", "EXECUTED"
+            FAILED = "FAILED", "FAILED"
+
+        user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="trades")
+        pair = models.ForeignKey(CurrencyPair, on_delete=models.PROTECT, related_name="trades")
+        side = models.CharField(max_length=4, choices=Side.choices)
+
+        amount_base = models.DecimalField(max_digits=20, decimal_places=6)  # executed base amount
+        rate = models.DecimalField(max_digits=20, decimal_places=6)  # execution rate snapshot
+        amount_quote = models.DecimalField(max_digits=20, decimal_places=6)  # amount_base * rate snapshot
+
+        status = models.CharField(max_length=16, choices=Status.choices, default=Status.EXECUTED)
+        executed_at = models.DateTimeField(default=timezone.now)
+
+        created_at = models.DateTimeField(auto_now_add=True)
+
+        class Meta:
+            ordering = ["-executed_at"]
+            indexes = [
+                models.Index(fields=["user", "-executed_at"]),
+                models.Index(fields=["pair", "-executed_at"]),
+            ]
+
+        def __str__(self) -> str:
+            return f"{self.user_id} {self.side} {self.pair.code} {self.amount_base}@{self.rate} ({self.status})"
+
+    class LimitOrder(models.Model):
+        class Side(models.TextChoices):
+            BUY = "BUY", "BUY"  # buy base using quote
+            SELL = "SELL", "SELL"  # sell base for quote
+
+        class Status(models.TextChoices):
+            PENDING = "PENDING", "PENDING"
+            EXECUTED = "EXECUTED", "EXECUTED"
+            CANCELLED = "CANCELLED", "CANCELLED"
+
+        user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="limit_orders")
+        pair = models.ForeignKey(CurrencyPair, on_delete=models.PROTECT, related_name="limit_orders")
+        side = models.CharField(max_length=4, choices=Side.choices)
+
+        amount_base = models.DecimalField(max_digits=20, decimal_places=6)
+        limit_rate = models.DecimalField(max_digits=20, decimal_places=6)
+
+        status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+        created_at = models.DateTimeField(auto_now_add=True)
+        updated_at = models.DateTimeField(auto_now=True)
+        executed_at = models.DateTimeField(null=True, blank=True)
+
+        class Meta:
+            ordering = ["-created_at"]
+            indexes = [
+                models.Index(fields=["user", "status", "-created_at"]),
+                models.Index(fields=["pair", "status", "-created_at"]),
+            ]
+
+        def __str__(self) -> str:
+            return f"{self.user_id} {self.side} {self.pair.code} {self.amount_base}@{self.limit_rate} ({self.status})"
+
+    # ---- Sprint 2: portfolio update helper (minimal, called by service layer) ----
+    class InsufficientBalance(Exception):
+        pass
+
+    def get_holding_for_update(user, currency):
+        """
+        Used inside transaction.atomic() to lock the holding row.
+        Creates holding row if missing.
+        """
+        holding, _ = PortfolioHolding.objects.select_for_update().get_or_create(
+            user=user, currency=currency, defaults={"amount": Decimal("0")}
+        )
+        return holding
