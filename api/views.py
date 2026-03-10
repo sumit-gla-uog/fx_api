@@ -464,12 +464,12 @@ def _apply_trade_to_portfolio(user, pair, side, amount, rate, total):
 
     if side == "buy":
         # User spends quote currency, receives base currency
-        _adjust_holding(user, base_currency,  amount,  rate)
-        _adjust_holding(user, quote_currency, -total,  rate)
+        _adjust_holding(user, base_currency,  -amount, rate)   # -GBP (kharch kia)
+        _adjust_holding(user, quote_currency, +total,  rate)   # +USD (purchase kia)
     else:
         # User sells base currency, receives quote currency
-        _adjust_holding(user, base_currency, -amount, rate)
-        _adjust_holding(user, quote_currency, total,  rate)
+       _adjust_holding(user, base_currency,  +amount, rate)   # +GBP (wapas mila)
+       _adjust_holding(user, quote_currency, -total,  rate)   # -USD (diya)
 
 
 def _adjust_holding(user, currency, delta, rate):
@@ -479,6 +479,11 @@ def _adjust_holding(user, currency, delta, rate):
         defaults={"amount": Decimal("0"), "avg_buy_rate": rate},
     )
     holding.amount += delta
+
+     #Never allow amount go below 0
+    if holding.amount < 0:
+        holding.amount = Decimal("0")
+
     if delta > 0:
         # Recalculating average buy rate only when buying more
         holding.avg_buy_rate = rate
