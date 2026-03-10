@@ -1,5 +1,7 @@
 from django.shortcuts import render
 
+import csv
+from django.http import HttpResponse
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.contrib.auth.models import User
@@ -7,7 +9,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Currency, CurrencyPair, PortfolioHolding
+from .models import Currency, CurrencyPair, PortfolioHolding, Trade, Order, PriceHistory
 from decimal import Decimal
 
 
@@ -97,7 +99,7 @@ def currencies_list(request):
     return Response({"currencies": currencies})
 
 
-# PAIRS API –  GET /pairs?search=
+# PAIRS API  GET /pairs?search=
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -121,6 +123,35 @@ def pairs_list(request):
         for p in qs
     ]
     return Response({"pairs": pairs})
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def pair_latest(request, id):
+    """GET /pairs/{id}/latest — current rate for a single pair."""
+    try:
+        p = CurrencyPair.objects.select_related("base", "quote").get(pk=id, enabled=True)
+    except CurrencyPair.DoesNotExist:
+        return Response({"error": "pair not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response({"pair": _serialize_pair(p)})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def pair_history(request, id):
+    """GET /pairs/{id}/history — price history snapshots for a pair."""
+    try:
+        p = CurrencyPair.objects.get(pk=id, enabled=True)
+    except CurrencyPair.DoesNotExist:
+        return Response({"error": "pair not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    limit   = int(request.query_params.get("limit", 50))
+    records = PriceHistory.objects.filter(pair=p)[:limit]
+
+    return Response({"history": [
+        {"rate": str(h.rate), "recorded_at": h.recorded_at.isoformat()}
+        for h in records
+    ]})
 
 
 # PORTFOLIO API –  GET /portfolio
@@ -167,7 +198,7 @@ def portfolio(request):
     })
 
 
-# DASHBOARD API –  GET /dashboard/summary
+# DASHBOARD API GET /dashboard/summary
 #               GET /dashboard/market-snapshot
 
 @api_view(["GET"])
@@ -220,3 +251,236 @@ def dashboard_market_snapshot(request):
         for p in pairs
     ]
     return Response({"market_snapshot": snapshot})
+
+
+# TRADES
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def trade_market(request):
+    """
+    POST /trades/market
+    Body: { "pair_id": int, "side": "buy"|"sell", "amount": "100.00" }
+    Executes immediately at the current rate and updates the user's portfolio.
+    """
+    pair_id = request.data.get("pair_id")
+    side    = request.data.get("side")
+    amount  = request.data.get("amount")
+
+    # Validating my inputs
+    if not all([pair_id, side, amount]):
+        return Response({"error": "pair_id, side, and amount are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if side not in ("buy", "sell"):
+        return Response({"error": "side must be 'buy' or 'sell'"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        amount = Decimal(str(amount))
+        if amount <= 0:
+            raise ValueError
+    except (ValueError, Exception):
+        return Response({"error": "amount must be a positive number"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        pair = CurrencyPair.objects.select_related("base", "quote").get(pk=pair_id, enabled=True)
+    except CurrencyPair.DoesNotExist:
+        return Response({"error": "pair not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    rate  = pair.rate
+    total = amount * rate   # how much quote currency isbeing spent/received
+
+    # Recording my trades
+    trade = Trade.objects.create(
+        user=request.user, pair=pair, side=side,
+        amount=amount, rate=rate, total=total,
+    )
+
+    #  Updating my portfolio holdings
+    _apply_trade_to_portfolio(request.user, pair, side, amount, rate, total)
+
+    return Response({
+        "trade": {
+            "id":          trade.id,
+            "pair":        f"{pair.base.code}/{pair.quote.code}",
+            "side":        trade.side,
+            "amount":      str(trade.amount),
+            "rate":        str(trade.rate),
+            "total":       str(trade.total),
+            "executed_at": trade.executed_at.isoformat(),
+        }
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def trades_list(request):
+    """GET /trades — list all trades for the authenticated user."""
+    trades = Trade.objects.filter(user=request.user).select_related("pair__base", "pair__quote")
+    return Response({"trades": [_serialize_trade(t) for t in trades]})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def trades_export(request):
+    """GET /trades/export — download trades as a CSV file."""
+    trades = Trade.objects.filter(user=request.user).select_related("pair__base", "pair__quote")
+
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="trades.csv"'
+
+    writer = csv.writer(response)
+    writer.writerow(["ID", "Pair", "Side", "Amount", "Rate", "Total", "Executed At"])
+    for t in trades:
+        writer.writerow([
+            t.id,
+            f"{t.pair.base.code}/{t.pair.quote.code}",
+            t.side,
+            t.amount,
+            t.rate,
+            t.total,
+            t.executed_at.isoformat(),
+        ])
+
+    return response
+
+
+# ORDERS
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def order_limit(request):
+    """
+    POST /orders/limit
+    Body: { "pair_id": int, "side": "buy"|"sell", "amount": "100.00", "limit_rate": "1.2500" }
+    Creates a limit order (status=open). Filling is handled separately.
+    """
+    pair_id    = request.data.get("pair_id")
+    side       = request.data.get("side")
+    amount     = request.data.get("amount")
+    limit_rate = request.data.get("limit_rate")
+
+    if not all([pair_id, side, amount, limit_rate]):
+        return Response({"error": "pair_id, side, amount, and limit_rate are required"},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    if side not in ("buy", "sell"):
+        return Response({"error": "side must be 'buy' or 'sell'"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        amount     = Decimal(str(amount))
+        limit_rate = Decimal(str(limit_rate))
+        if amount <= 0 or limit_rate <= 0:
+            raise ValueError
+    except (ValueError, Exception):
+        return Response({"error": "amount and limit_rate must be positive numbers"},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        pair = CurrencyPair.objects.select_related("base", "quote").get(pk=pair_id, enabled=True)
+    except CurrencyPair.DoesNotExist:
+        return Response({"error": "pair not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    order = Order.objects.create(
+        user=request.user, pair=pair, side=side,
+        amount=amount, limit_rate=limit_rate, status="open",
+    )
+
+    return Response({"order": _serialize_order(order)}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def orders_list(request):
+    """GET /orders?status= — list orders, optionally filtered by status."""
+    status_filter = request.query_params.get("status", "").strip().lower()
+    qs = Order.objects.filter(user=request.user).select_related("pair__base", "pair__quote")
+
+    if status_filter in ("open", "filled", "cancelled"):
+        qs = qs.filter(status=status_filter)
+
+    return Response({"orders": [_serialize_order(o) for o in qs]})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def order_cancel(request, id):
+    """POST /orders/{id}/cancel — cancel an open order."""
+    try:
+        order = Order.objects.get(pk=id, user=request.user)
+    except Order.DoesNotExist:
+        return Response({"error": "order not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    if order.status != "open":
+        return Response({"error": f"cannot cancel an order with status '{order.status}'"},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    order.status = "cancelled"
+    order.save()
+
+    return Response({"order": _serialize_order(order)})
+
+# UTIL helper methods, I will move this later in anothor folder - Todo Sumit
+
+def _serialize_pair(p):
+    return {
+        "id":         p.id,
+        "base":       {"code": p.base.code, "name": p.base.name, "symbol": p.base.symbol, "flag": p.base.flag},
+        "quote":      {"code": p.quote.code, "name": p.quote.name, "symbol": p.quote.symbol, "flag": p.quote.flag},
+        "pair":       f"{p.base.code}/{p.quote.code}",
+        "rate":       str(p.rate),
+        "change_pct": str(p.change_pct),
+    }
+
+
+def _serialize_trade(t):
+    return {
+        "id":          t.id,
+        "pair":        f"{t.pair.base.code}/{t.pair.quote.code}",
+        "side":        t.side,
+        "amount":      str(t.amount),
+        "rate":        str(t.rate),
+        "total":       str(t.total),
+        "executed_at": t.executed_at.isoformat(),
+    }
+
+
+def _serialize_order(o):
+    return {
+        "id":         o.id,
+        "pair":       f"{o.pair.base.code}/{o.pair.quote.code}",
+        "side":       o.side,
+        "amount":     str(o.amount),
+        "limit_rate": str(o.limit_rate),
+        "status":     o.status,
+        "created_at": o.created_at.isoformat(),
+        "updated_at": o.updated_at.isoformat(),
+    }
+
+
+def _apply_trade_to_portfolio(user, pair, side, amount, rate, total):
+    """Updating my PortfolioHolding rows after a market trade executes."""
+    base_currency  = pair.base
+    quote_currency = pair.quote
+
+    if side == "buy":
+        # User spends quote currency, receives base currency
+        _adjust_holding(user, base_currency,  amount,  rate)
+        _adjust_holding(user, quote_currency, -total,  rate)
+    else:
+        # User sells base currency, receives quote currency
+        _adjust_holding(user, base_currency, -amount, rate)
+        _adjust_holding(user, quote_currency, total,  rate)
+
+
+def _adjust_holding(user, currency, delta, rate):
+    """Add or subtract from a holding; create if it doesn't exist."""
+    holding, _ = PortfolioHolding.objects.get_or_create(
+        user=user, currency=currency,
+        defaults={"amount": Decimal("0"), "avg_buy_rate": rate},
+    )
+    holding.amount += delta
+    if delta > 0:
+        # Recalculating average buy rate only when buying more
+        holding.avg_buy_rate = rate
+    holding.save()
+

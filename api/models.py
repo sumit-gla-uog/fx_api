@@ -38,3 +38,62 @@ class PortfolioHolding(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.currency.code}"
+    
+    
+class PriceHistory(models.Model):
+    """Snapshot of a pair's rate at a point in time."""
+
+    pair = models.ForeignKey(CurrencyPair, on_delete=models.CASCADE, related_name='history')
+    rate = models.DecimalField(max_digits=20, decimal_places=6)
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-recorded_at']
+
+    def __str__(self):
+        return f"{self.pair} @ {self.rate} ({self.recorded_at})"
+
+
+class Trade(models.Model):
+    """A completed market trade executed immediately at the current rate."""
+
+    SIDE_CHOICES = [('buy', 'Buy'), ('sell', 'Sell')]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='trades')
+    pair = models.ForeignKey(CurrencyPair, on_delete=models.CASCADE, related_name='trades')
+    side = models.CharField(max_length=4, choices=SIDE_CHOICES)          # 'buy' | 'sell'
+    amount = models.DecimalField(max_digits=20, decimal_places=6)        # base currency amount
+    rate = models.DecimalField(max_digits=20, decimal_places=6)          # rate at execution
+    total = models.DecimalField(max_digits=20, decimal_places=6)         # amount * rate (quote)
+    executed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-executed_at']
+
+    def __str__(self):
+        return f"{self.user.username} {self.side} {self.amount} {self.pair} @ {self.rate}"
+
+
+class Order(models.Model):
+    """A limit order that waits until the market hits the target rate."""
+    SIDE_CHOICES = [('buy', 'Buy'), ('sell', 'Sell')]
+    STATUS_CHOICES = [
+        ('open',      'Open'),
+        ('filled',    'Filled'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='orders')
+    pair = models.ForeignKey(CurrencyPair, on_delete=models.CASCADE, related_name='orders')
+    side = models.CharField(max_length=4, choices=SIDE_CHOICES)
+    amount = models.DecimalField(max_digits=20, decimal_places=6)        # base currency amount
+    limit_rate = models.DecimalField(max_digits=20, decimal_places=6)    # target rate
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='open')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username} {self.side} {self.amount} {self.pair} limit@{self.limit_rate} [{self.status}]"
