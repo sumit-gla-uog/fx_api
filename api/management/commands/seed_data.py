@@ -1,3 +1,7 @@
+import random
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from api.models import PriceHistory
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
 from api.models import Currency, CurrencyPair, PortfolioHolding
@@ -72,4 +76,32 @@ class Command(BaseCommand):
                 defaults={"amount": amount, "avg_buy_rate": avg_rate}
             )
         self.stdout.write(self.style.SUCCESS("Seeded demo portfolio holdings"))
+
+        PriceHistory.objects.all().delete()
+        now = datetime.now(timezone.utc)
+
+        for pair in CurrencyPair.objects.filter(enabled=True):
+            self.stdout.write(f"Seeding history for {pair}...")
+            base_rate = float(pair.rate)
+            volatility = base_rate * 0.003
+            records = []
+            current_rate = base_rate
+
+            for hours_ago in range(720, 0, -1):
+                timestamp = now - timedelta(hours=hours_ago)
+                change = random.gauss(0, volatility)
+                mean_reversion = (base_rate - current_rate) * 0.05
+                current_rate = current_rate + change + mean_reversion
+                current_rate = max(current_rate, base_rate * 0.7)
+                current_rate = min(current_rate, base_rate * 1.3)
+                records.append(PriceHistory(
+                    pair=pair,
+                    rate=Decimal(str(round(current_rate, 6))),
+                    recorded_at=timestamp,
+                ))
+
+            PriceHistory.objects.bulk_create(records)
+            self.stdout.write(f"  ✓ {len(records)} records for {pair}")
+
+        self.stdout.write(self.style.SUCCESS(f"Price history done! Total: {PriceHistory.objects.count()}"))
         self.stdout.write(self.style.SUCCESS("Done! Run: python manage.py seed_data"))

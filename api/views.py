@@ -11,6 +11,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from .models import Currency, CurrencyPair, PortfolioHolding, Trade, Order, PriceHistory
 from decimal import Decimal
+from django.utils import timezone
+from datetime import timedelta
 
 
 
@@ -139,19 +141,49 @@ def pair_latest(request, id):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def pair_history(request, id):
-    """GET /pairs/{id}/history — price history snapshots for a pair."""
+    """
+    GET /pairs/{id}/history/?period=1h|1d|1w|1m
+    Returns price history for a pair filtered by period.
+    """
     try:
         p = CurrencyPair.objects.get(pk=id, enabled=True)
     except CurrencyPair.DoesNotExist:
         return Response({"error": "pair not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    limit   = int(request.query_params.get("limit", 50))
-    records = PriceHistory.objects.filter(pair=p)[:limit]
+    period = request.query_params.get("period", "1d").lower()
 
-    return Response({"history": [
-        {"rate": str(h.rate), "recorded_at": h.recorded_at.isoformat()}
-        for h in records
-    ]})
+    now = timezone.now()
+    period_map = {
+        "1h": now - timedelta(hours=1),
+        "1d": now - timedelta(days=1),
+        "1w": now - timedelta(weeks=1),
+        "1m": now - timedelta(days=30),
+    }
+    since = period_map.get(period, period_map["1d"])
+
+    records = PriceHistory.objects.filter(
+        pair=p,
+        recorded_at__gte=since
+    ).order_by("recorded_at")
+
+    # For 1h all points, for longer periods, sample to max 200 points
+    max_points = 200
+    record_list = list(records)
+    if len(record_list) > max_points:
+        step = len(record_list) // max_points
+        record_list = record_list[::step]
+
+    return Response({
+        "pair": f"{p.base.code}/{p.quote.code}",
+        "period": period,
+        "history": [
+            {
+                "rate": str(h.rate),
+                "recorded_at": h.recorded_at.isoformat(),
+            }
+            for h in record_list
+        ],
+    })
 
 
 # PORTFOLIO API –  GET /portfolio

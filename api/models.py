@@ -39,13 +39,14 @@ class PortfolioHolding(models.Model):
     def __str__(self):
         return f"{self.user.username} - {self.currency.code}"
     
-    
+
 class PriceHistory(models.Model):
     """Snapshot of a pair's rate at a point in time."""
 
     pair = models.ForeignKey(CurrencyPair, on_delete=models.CASCADE, related_name='history')
     rate = models.DecimalField(max_digits=20, decimal_places=6)
-    recorded_at = models.DateTimeField(auto_now_add=True)
+    # recorded_at = models.DateTimeField(auto_now_add=True)
+    recorded_at = models.DateTimeField()
 
     class Meta:
         ordering = ['-recorded_at']
