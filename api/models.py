@@ -110,10 +110,20 @@ class PortfolioHolding(models.Model):
         Historical FX rate for a given CurrencyPair.
         rate = quote per 1 base (e.g., GBP/USD rate=1.25 means 1 GBP = 1.25 USD)
         """
+
+        class Source(models.TextChoices):
+            API = "api", "API"
+            MANUAL = "manual", "MANUAL"
+            CSV = "csv", "CSV"
+
         pair = models.ForeignKey(CurrencyPair, on_delete=models.PROTECT, related_name="rates")
         rate = models.DecimalField(max_digits=20, decimal_places=6)
         as_of = models.DateTimeField(default=timezone.now)
-        source = models.CharField(max_length=16, default="seed")  # seed/api/manual/csv
+        source = models.CharField(
+            max_length=16,
+            choices=Source.choices,
+            default=Source.API
+        )
 
         created_at = models.DateTimeField(auto_now_add=True)
 
@@ -206,3 +216,86 @@ class PortfolioHolding(models.Model):
             user=user, currency=currency, defaults={"amount": Decimal("0")}
         )
         return holding
+
+    class RateAuditLog(models.Model):
+        class Action(models.TextChoices):
+            CREATED = "CREATED", "CREATED"
+            UPDATED = "UPDATED", "UPDATED"
+            IMPORTED = "IMPORTED", "IMPORTED"
+
+        pair = models.ForeignKey(CurrencyPair, on_delete=models.PROTECT, related_name="rate_audit_logs")
+        rate = models.DecimalField(max_digits=20, decimal_places=6)
+        source = models.CharField(
+            max_length=16,
+            choices=ExchangeRate.Source.choices
+        )
+        action = models.CharField(
+            max_length=16,
+            choices=Action.choices,
+            default=Action.UPDATED
+        )
+        changed_by = models.ForeignKey(
+            settings.AUTH_USER_MODEL,
+            on_delete=models.SET_NULL,
+            null=True,
+            blank=True,
+            related_name="rate_audit_logs"
+        )
+        note = models.CharField(max_length=255, blank=True)
+        created_at = models.DateTimeField(auto_now_add=True)
+
+        class Meta:
+            ordering = ["-created_at"]
+            indexes = [
+                models.Index(fields=["pair", "-created_at"]),
+                models.Index(fields=["source", "-created_at"]),
+            ]
+
+        def __str__(self) -> str:
+            return f"{self.pair.code} {self.action} {self.rate} ({self.source})"
+
+        class APIHealthStatus(models.Model):
+            class Status(models.TextChoices):
+                UP = "UP", "UP"
+                DOWN = "DOWN", "DOWN"
+                DEGRADED = "DEGRADED", "DEGRADED"
+                UNKNOWN = "UNKNOWN", "UNKNOWN"
+
+            provider_name = models.CharField(max_length=64, unique=True)
+            endpoint = models.URLField(blank=True)
+            status = models.CharField(
+                max_length=16,
+                choices=Status.choices,
+                default=Status.UNKNOWN
+            )
+            status_code = models.IntegerField(null=True, blank=True)
+            response_time_ms = models.IntegerField(null=True, blank=True)
+            message = models.CharField(max_length=255, blank=True)
+            checked_at = models.DateTimeField(null=True, blank=True)
+            updated_at = models.DateTimeField(auto_now=True)
+
+            class Meta:
+                ordering = ["provider_name"]
+
+            def __str__(self) -> str:
+                return f"{self.provider_name} - {self.status}"
+
+            class UserProfile(models.Model):
+                class Role(models.TextChoices):
+                    CUSTOMER = "CUSTOMER", "CUSTOMER"
+                    ADMIN = "ADMIN", "ADMIN"
+
+                user = models.OneToOneField(
+                    settings.AUTH_USER_MODEL,
+                    on_delete=models.CASCADE,
+                    related_name="profile"
+                )
+                role = models.CharField(
+                    max_length=16,
+                    choices=Role.choices,
+                    default=Role.CUSTOMER
+                )
+                created_at = models.DateTimeField(auto_now_add=True)
+
+                def __str__(self) -> str:
+                    return f"{self.user.username} - {self.role}"

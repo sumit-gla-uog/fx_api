@@ -5,7 +5,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from api.models import CurrencyPair, ExchangeRate
+from api.models import CurrencyPair
+from api.services.rates import upsert_exchange_rate
 
 
 def _quant6(x: Decimal) -> Decimal:
@@ -17,7 +18,13 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--days", type=int, default=30, help="Number of daily points per pair (default 30)")
-        parser.add_argument("--source", type=str, default="seed", help="Rate source label (default seed)")
+        parser.add_argument(
+            "--source",
+            type=str,
+            default="api",
+            choices=["api", "manual", "csv"],
+            help="Rate source label"
+        )
 
     def handle(self, *args, **options):
         days = int(options["days"])
@@ -57,10 +64,13 @@ class Command(BaseCommand):
 
                 rate_val = _quant6(current)
 
-                obj, is_created = ExchangeRate.objects.update_or_create(
+                obj, is_created = upsert_exchange_rate(
                     pair=pair,
+                    rate=rate_val,
                     as_of=as_of,
-                    defaults={"rate": rate_val, "source": source},
+                    source=source,
+                    changed_by=None,
+                    note="Sprint2 simulated seed data",
                 )
                 created += int(is_created)
                 updated += int(not is_created)
