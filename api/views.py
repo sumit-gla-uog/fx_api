@@ -28,12 +28,10 @@ def signup(request):
 
     if not username or not password:
         return Response({"error": "username and password required"}, status=status.HTTP_400_BAD_REQUEST)
-
     if User.objects.filter(username=username).exists():
         return Response({"error": "username already exists"}, status=status.HTTP_400_BAD_REQUEST)
 
     user = User.objects.create_user(username=username, password=password, email=email)
-
     if role == "admin":
         user.is_staff = True
         user.save()
