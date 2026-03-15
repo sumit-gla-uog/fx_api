@@ -10,6 +10,15 @@ from .views import (
     trade_market, trades_list, trades_export,
     order_limit, orders_list, order_cancel,
 )
+from .admin_views import (
+    admin_dashboard,
+    admin_currencies_list,
+    admin_currency_add,
+    admin_currency_toggle,
+    admin_rates_list,
+    admin_rate_manual,
+    admin_rate_csv,
+)
 
 urlpatterns = [
     # Auth
@@ -43,4 +52,13 @@ urlpatterns = [
     path("v1/orders/limit/",          order_limit,  name="order-limit"),   
     path("v1/orders/",                orders_list,  name="orders-list"), 
     path("v1/orders/<int:id>/cancel/",order_cancel, name="order-cancel"),
+
+    # Admin
+    path("v1/admin/dashboard/",                  admin_dashboard,       name="admin-dashboard"),
+    path("v1/admin/currencies/",                 admin_currencies_list, name="admin-currencies-list"),
+    path("v1/admin/currencies/add/",             admin_currency_add,    name="admin-currency-add"),
+    path("v1/admin/currencies/<int:id>/toggle/", admin_currency_toggle, name="admin-currency-toggle"),
+    path("v1/admin/rates/",                      admin_rates_list,      name="admin-rates-list"),
+    path("v1/admin/rates/manual/",               admin_rate_manual,     name="admin-rate-manual"),
+    path("v1/admin/rates/csv/",                  admin_rate_csv,        name="admin-rate-csv"),
 ]
