@@ -15,6 +15,12 @@ from django.utils import timezone
 from datetime import timedelta
 
 
+# Health check API
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def health_check(request):
+    return Response({"status": "ok"})
+
 
 # AUTH API
 
