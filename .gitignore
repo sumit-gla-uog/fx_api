@@ -1,0 +1,16 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+.venv/
+
+# Database
+db.sqlite3
+
+# Environment variables
+.env
+
+# Mac
+.DS_Store
