@@ -125,8 +125,11 @@ def admin_currencies_list(request):
 @permission_classes([IsAuthenticated])
 def admin_currency_add(request):
     """
-    POST /admin/currencies/
+    POST /admin/currencies/add/
     Body: { "code": "AED", "name": "UAE Dirham", "symbol": "د.إ", "flag": "🇦🇪" }
+    
+    Creates the currency AND auto-creates GBP/NEW pairs with a default rate of 1.0
+    Admin should then manually update the rate via /admin/rates/manual/
     """
     if not _is_admin(request.user):
         return Response({"error": "Admin access required"}, status=status.HTTP_403_FORBIDDEN)
@@ -148,10 +151,38 @@ def admin_currency_add(request):
     if Currency.objects.filter(code=code).exists():
         return Response({"error": f"Currency {code} already exists"}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Create the currency
     currency = Currency.objects.create(
         code=code, name=name, symbol=symbol, flag=flag, enabled=True
     )
-    return Response({"currency": _serialize_currency(currency)}, status=status.HTTP_201_CREATED)
+
+    # Auto-create pairs with GBP as base (GBP/NEW_CURRENCY)
+    pairs_created = []
+    try:
+        gbp = Currency.objects.get(code="GBP")
+
+        # GBP/NEW pair — e.g. GBP/AED
+        pair, created = CurrencyPair.objects.get_or_create(
+            base=gbp,
+            quote=currency,
+            defaults={"rate": Decimal("1.000000"), "change_pct": Decimal("0"), "enabled": True}
+        )
+        if created:
+            pairs_created.append(str(pair))
+
+    except Currency.DoesNotExist:
+        pass  # GBP not in DB yet — skip pair creation
+
+    return Response({
+        "currency": _serialize_currency(currency),
+        "pairs_created": pairs_created,
+        "message": f"{code} added. {len(pairs_created)} pair(s) created with default rate 1.0 — update rates manually.",
+    }, status=status.HTTP_201_CREATED)
+
+
+# admin_views.py ke top mein ye import already hona chahiye:
+# from decimal import Decimal, InvalidOperation
+# agar nahi hai toh add karo
 
 
 # PATCH /api/v1/admin/currencies/{id}/toggle/
