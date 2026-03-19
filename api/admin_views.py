@@ -171,18 +171,13 @@ def admin_currency_add(request):
             pairs_created.append(str(pair))
 
     except Currency.DoesNotExist:
-        pass  # GBP not in DB yet — skip pair creation
+        pass  # GBP not in DB yet, skip pair creation
 
     return Response({
         "currency": _serialize_currency(currency),
         "pairs_created": pairs_created,
         "message": f"{code} added. {len(pairs_created)} pair(s) created with default rate 1.0 — update rates manually.",
     }, status=status.HTTP_201_CREATED)
-
-
-# admin_views.py ke top mein ye import already hona chahiye:
-# from decimal import Decimal, InvalidOperation
-# agar nahi hai toh add karo
 
 
 # PATCH /api/v1/admin/currencies/{id}/toggle/

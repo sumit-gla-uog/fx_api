@@ -1,6 +1,5 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-# from .views import currencies_list, signup, me, logout_view
 from .views import (
     health_check,
     currencies_list, signup, me, logout_view,
@@ -9,7 +8,7 @@ from .views import (
     dashboard_summary, dashboard_market_snapshot,
     pair_latest, pair_history,
     trade_market, trades_list, trades_export,
-    order_limit, orders_list, order_cancel,
+    order_limit, orders_list, order_cancel,portfolio_deposit,
 )
 from .admin_views import (
     admin_dashboard,
@@ -43,6 +42,7 @@ urlpatterns = [
 
     # Portfolio
     path("v1/portfolio/", portfolio, name="portfolio"),
+    path("v1/portfolio/deposit/", portfolio_deposit, name="portfolio-deposit"), 
 
     # Dashboard
     path("v1/dashboard/summary/", dashboard_summary, name="dashboard-summary"),

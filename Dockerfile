@@ -5,7 +5,6 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# psycopg2-binary ke liye system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     libpq-dev \

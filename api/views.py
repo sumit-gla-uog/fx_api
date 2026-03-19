@@ -1,6 +1,7 @@
 from django.shortcuts import render
 
 import csv
+import re 
 from django.http import HttpResponse
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -79,6 +80,79 @@ def logout_view(request):
 #   { "code": 'SGD', "name": 'Singapore Dollar', "symbol": 'S$', "flag": '🇸🇬', "enabled": True },
 # ]
 #     return Response({"currencies": currencies})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def portfolio_deposit(request):
+    """
+    POST /api/v1/portfolio/deposit/
+    Body: {
+        "amount": "1000.00",
+        "currency": "GBP",
+        "bank_name": "HSBC",
+        "account_number": "12345678",
+        "sort_code": "12-34-56"
+    }
+    Simulates a bank deposit — adds funds to user's GBP holding.
+    """
+    amount_str     = request.data.get("amount", "").strip()
+    currency_code  = "GBP"   # always GBP — user deposits GBP then buys other currencies
+    bank_name      = request.data.get("bank_name", "").strip()
+    account_number = request.data.get("account_number", "").strip()
+    sort_code      = request.data.get("sort_code", "").strip()
+
+    # Validation
+    if not amount_str:
+        return Response({"error": "amount is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        amount = Decimal(str(amount_str))
+        if amount <= 0:
+            raise ValueError
+    except (ValueError, Exception):
+        return Response({"error": "amount must be a positive number"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if amount > Decimal("100000"):
+        return Response({"error": "maximum deposit is 100,000"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not bank_name or not account_number or not sort_code:
+        return Response(
+            {"error": "bank_name, account_number, and sort_code are required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if not re.match(r"^\d{8}$", account_number):
+        return Response({"error": "account_number must be 8 digits"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not re.match(r"^\d{2}-\d{2}-\d{2}$", sort_code):
+        return Response({"error": "sort_code must be in format XX-XX-XX"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Get currency
+    try:
+        currency = Currency.objects.get(code=currency_code, enabled=True)
+    except Currency.DoesNotExist:
+        return Response({"error": f"Currency {currency_code} not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    # Add to portfolio holding
+    holding, created = PortfolioHolding.objects.get_or_create(
+        user=request.user,
+        currency=currency,
+        defaults={"amount": Decimal("0"), "avg_buy_rate": Decimal("1")},
+    )
+    holding.amount += amount
+    holding.save()
+
+    return Response({
+        "ok": True,
+        "message": f"Successfully deposited {amount} {currency_code}",
+        "deposit": {
+            "amount":      str(amount),
+            "currency":    currency_code,
+            "bank_name":   bank_name,
+            "new_balance": str(holding.amount),
+        }
+    }, status=status.HTTP_200_OK)
 
 
 # CURRENCIES API  –  GET /currencies?search=
@@ -455,7 +529,7 @@ def order_cancel(request, id):
 
     return Response({"order": _serialize_order(order)})
 
-# UTIL helper methods, I will move this later in anothor folder - Todo Sumit
+# UTIL helper methods, I will move this later in anothor folder
 
 def _serialize_pair(p):
     return {
