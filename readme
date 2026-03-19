@@ -1,3 +1,270 @@
+# FX Exchange — Multi-Currency Trading Platform
+
+A simulated multi-currency trading platform built for the University of Glasgow Internet Technology (M) coursework. The application allows retail users to manage GBP-based currency holdings, execute market trades, place limit orders, and view trade history. Administrators can manage currencies and update exchange rates manually or via CSV import.
+
+---
+
+## Project Structure
+
+```
+fx_api/                  - Django REST API (backend)
+FXExchange_frontend/     -  React 19 SPA (frontend)
+```
+
+---
+
+## Backend — Django REST API
+
+### Tech Stack
+
+| Technology | Purpose |
+|---|---|
+| Python 3.13 | Language |
+| Django 5 | Web framework |
+| Django REST Framework | API layer |
+| djangorestframework-simplejwt | JWT authentication |
+| SQLite | Database |
+
+### Prerequisites
+
+- Python 3.10+
+- pip
+
+### Setup & Run
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/sumit-gla-uog/fx_api.git
+cd fx_api
+
+# 2. Create and activate virtual environment
+python -m venv .venv
+source .venv/bin/activate        # Mac / Linux
+.venv\Scripts\activate           # Windows
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Apply migrations
+python manage.py migrate
+
+# 5. Create a superuser (optional — for Django admin panel)
+python manage.py createsuperuser
+
+# 6. Run the development server
+python manage.py runserver
+```
+
+The API will be available at `http://127.0.0.1:8000`
+
+### Running Tests
+
+```bash
+# Run all backend tests (115 tests)
+python manage.py test api
+
+# Run specific test file
+python manage.py test api.tests.test_models
+python manage.py test api.tests.test_views
+python manage.py test api.tests.test_admin_models
+python manage.py test api.tests.test_admin_views
+```
+
+### Key API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/v1/auth/signup/` | Register a new user |
+| POST | `/api/v1/auth/login/` | Login and get JWT tokens |
+| POST | `/api/v1/auth/refresh/` | Refresh access token |
+| GET | `/api/v1/auth/me/` | Get current user info |
+| GET | `/api/v1/currencies/` | List enabled currencies |
+| GET | `/api/v1/pairs/` | List currency pairs with rates |
+| GET | `/api/v1/portfolio/` | Get user portfolio holdings |
+| POST | `/api/v1/portfolio/deposit/` | Simulated GBP deposit |
+| POST | `/api/v1/trades/market/` | Execute a market trade |
+| GET | `/api/v1/trades/` | List user trades |
+| POST | `/api/v1/orders/limit/` | Place a limit order |
+| GET | `/api/v1/orders/` | List user orders |
+| POST | `/api/v1/orders/<id>/cancel/` | Cancel an open order |
+| GET | `/api/v1/admin/dashboard/` | Admin stats overview |
+| GET | `/api/v1/admin/currencies/` | List all currencies (admin) |
+| POST | `/api/v1/admin/currencies/add/` | Add a new currency (admin) |
+| PATCH | `/api/v1/admin/currencies/<id>/toggle/` | Enable/disable currency (admin) |
+| POST | `/api/v1/admin/rates/manual/` | Manually update exchange rate (admin) |
+| POST | `/api/v1/admin/rates/csv/` | Bulk update rates via CSV (admin) |
+
+### Environment Variables
+
+No `.env` file is required for local development — the backend runs with SQLite out of the box.
+
+For production, set the following:
+
+```env
+SECRET_KEY=your-django-secret-key
+DEBUG=False
+ALLOWED_HOSTS=your-domain.com
+```
+
+### Seeding Initial Data (Optional)
+
+To add currencies and pairs manually, use the Admin Rate Management API endpoints after creating an admin user, or use the Django admin panel at `http://127.0.0.1:8000/admin`.
+
+---
+
+## Frontend — React SPA
+
+### Tech Stack
+
+| Technology | Purpose |
+|---|---|
+| React 19 + TypeScript | UI framework |
+| Vite 5 | Build tool |
+| Salt DS | UI component library |
+| AG Grid | Data tables (portfolio, orders, history, pairs) |
+| Highcharts | Rate history chart on pair detail page |
+| SWR | API data fetching and caching |
+| React Router v6 | Client-side routing |
+| React Hook Form | Form management and validation |
+| React Dropzone | CSV file drag-and-drop upload |
+
+### Prerequisites
+
+- Node.js 18+
+- npm
+
+### Setup & Run
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/sumit-gla-uog/FXExchange_frontend.git
+cd FXExchange_frontend
+
+# 2. Install dependencies
+npm install
+
+# 3. Create environment file
+cp .env.example .env.development     # or create manually (see below)
+
+# 4. Start the development server
+npm run dev
+```
+
+The app will be available at `http://localhost:5173`
+
+### Environment Variables
+
+Create a `.env.development` file in the project root:
+
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+For production deployment (e.g. Render):
+
+```env
+VITE_API_BASE_URL=https://your-backend.onrender.com
+```
+
+### Build for Production
+
+```bash
+npm run build
+# Output will be in the dist/ folder
+```
+
+### Running Tests
+
+```bash
+# Run all frontend tests
+npm run test
+
+# Run tests with coverage report
+npm run coverage
+```
+
+### Project Structure
+
+```
+src/
+├── api/            ← API client, auth helpers, SWR fetcher
+├── auth/           ← RequireAuth route guard
+├── components/
+│   ├── grids/      ← AG Grid cell renderers
+│   └── ui/         ← Reusable components (CurrencyCard, StatCard, etc.)
+├── hooks/
+│   ├── customer/   ← useDashboard, usePairs, useDeposit, etc.
+│   └── useSignup   ← Signup hook
+├── pages/
+│   ├── admin/      ← Admin dashboard, currencies, rates pages
+│   ├── customer/   ← Dashboard, portfolio, pairs, orders, history pages
+│   ├── Loginpage/  ← Login page
+│   ├── SignupPage/ ← Sign up page
+│   └── SelectRolePage/ ← Role selection after login
+├── styles/         ← Global CSS and AG Grid overrides
+├── test/           ← Vitest + React Testing Library tests
+└── types/          ← TypeScript type definitions
+```
+
+---
+
+## Running Both Together (Local Development)
+
+Open two terminal windows:
+
+**Terminal 1 — Backend:**
+```bash
+cd fx_api
+source .venv/bin/activate
+python manage.py runserver
+```
+
+**Terminal 2 — Frontend:**
+```bash
+cd FXExchange_frontend
+npm run dev
+```
+
+Then open `http://localhost:5173` in your browser.
+
+### First Time Setup
+
+1. Go to `http://localhost:5173/signup` and create a **Customer** account
+2. To create an **Admin** account, either:
+   - Sign up and then use the Django shell to set `is_staff=True`
+   - Or use `python manage.py createsuperuser`
+3. Log in and select your role
+4. As a **Customer**: deposit simulated GBP, then browse pairs and trade
+5. As an **Admin**: add currencies and update exchange rates before customers can trade
+
+---
+
+## Deployed Application
+
+| Service | URL |
+|---|---|
+| Frontend | https://fxexchange-frontend.onrender.com |
+| Backend API | https://fx-api-clyd.onrender.com |
+
+---
+
+## Repositories
+
+| Repo | URL |
+|---|---|
+| Backend | https://github.com/sumit-gla-uog/fx_api |
+| Frontend | https://github.com/sumit-gla-uog/FXExchange_frontend |
+
+---
+
+## Notes
+
+- This is a **simulated trading platform** — no real money or bank transfers are involved
+- Exchange rates are managed internally by admins — no live third-party FX API is used
+- All trades are executed at the admin-set rate at time of execution
+- The Sell trade direction is supported by the backend API but is not exposed in the customer UI
+
+Steps to execute backend api
 source .venv/bin/activate
 
 python manage.py makemigrations
